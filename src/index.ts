@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const SUBY_API_KEY = process.env.SUBY_API_KEY;
-const SUBY_API_URL = process.env.SUBY_API_URL || 'https://api.suby.fi/api';
+const SUBY_API_URL = process.env.SUBY_API_URL || 'https://api.suby.fi';
 
 // Type definitions
 interface WebhookPayload {
@@ -192,7 +192,7 @@ app.post('/payment/create', async (req: Request, res: Response) => {
       body,
       {
         headers: {
-          'Authorization': `Bearer ${SUBY_API_KEY}`,
+          'Authorization': `X-Suby-Api-Key ${SUBY_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }

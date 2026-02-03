@@ -176,7 +176,7 @@ curl -X POST http://localhost:3000/webhooks \
 - HMAC-SHA256 signature verification for webhooks
 - Timestamp validation (rejects webhooks > 5 minutes old)
 - Raw body preservation for signature verification
-- Bearer token authentication for API calls
+- X-Suby-Api-Key token authentication for API calls
 
 ## Project Structure
 
