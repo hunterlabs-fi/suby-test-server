@@ -76,6 +76,11 @@ Example webhook events:
 - `PAYMENT_SUCCESS` - Payment successful
 - `PAYMENT_FAILED` - Payment failed
 
+Each webhook payload includes comprehensive payment and customer information:
+- Payment details (ID, status, amount, transaction hash)
+- Customer identification (email, Discord ID/username, Telegram ID/username)
+- Context data (external reference, metadata, redirect URLs)
+
 ### Create Payment Intent
 
 ```bash
@@ -157,9 +162,9 @@ curl -X POST http://localhost:3000/payment/create \
 ### Simulating a Webhook (for testing)
 
 ```bash
-# Generate signature
+# Generate signature with complete payload including customer fields
 TIMESTAMP=$(date +%s)
-BODY='{"id":"evt_test","type":"PAYMENT_SUCCESS","createdAt":"2026-01-22T10:30:00.000Z","data":{"payment":{"id":"pay_123","status":"PAYMENT_SUCCESS","subscriptionId":null,"planId":"plan_456"},"context":{}}}'
+BODY='{"id":"evt_test123","type":"PAYMENT_SUCCESS","createdAt":"2026-02-05T10:30:00.000Z","data":{"payment":{"id":"pay_abc123xyz","status":"SUCCESS","subscriptionId":"sub_xyz789","productId":"product_456def","valueUsd":"999","txHash":"0x1234567890abcdef...","source":"CRYPTO","customerEmail":"customer@example.com","customerDiscordId":"123456789012345678","customerTelegramId":null,"customerDiscordUsername":"user#1234","customerTelegramUsername":null},"context":{"externalRef":"order_789xyz","metadata":{"orderId":"12345","source":"mobile_app"},"successUrl":"https://your-app.com/success","cancelUrl":"https://your-app.com/cancel"}}}'
 SIGNATURE=$(echo -n "${TIMESTAMP}.${BODY}" | openssl dgst -sha256 -hmac "your_webhook_secret_here" | cut -d' ' -f2)
 
 # Send webhook
@@ -169,6 +174,42 @@ curl -X POST http://localhost:3000/webhooks \
   -H "X-Webhook-Timestamp: ${TIMESTAMP}" \
   -H "X-Webhook-Signature: v1=${SIGNATURE}" \
   -d "${BODY}"
+```
+
+**Webhook Payload Structure:**
+
+The webhook includes comprehensive payment and customer information:
+
+```typescript
+interface WebhookEvent {
+  id: string;                    // Unique event ID (evt_xxx format)
+  type: string;                  // Event type (PAYMENT_SUCCESS, PAYMENT_FAILED, etc.)
+  createdAt: string;             // ISO 8601 timestamp
+  data: {
+    payment: {
+      id: string;                // Payment ID
+      status: string;            // Payment status
+      subscriptionId: string | null;
+      productId: string | null;
+      valueUsd: string | null;   // Amount in cents
+      txHash: string | null;     // Blockchain transaction hash (crypto only)
+      source: string | null;     // "CRYPTO" or "FIAT"
+
+      // Customer identification fields
+      customerEmail: string | null;
+      customerDiscordId: string | null;
+      customerTelegramId: string | null;
+      customerDiscordUsername: string | null;
+      customerTelegramUsername: string | null;
+    };
+    context: {
+      externalRef: string | null;       // Your internal reference
+      metadata: Record<string, any> | null;  // Custom metadata
+      successUrl: string | null;
+      cancelUrl: string | null;
+    };
+  };
+}
 ```
 
 ## Security Features

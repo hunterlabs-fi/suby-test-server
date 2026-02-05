@@ -22,13 +22,23 @@ interface WebhookPayload {
       id: string;
       status: string;
       subscriptionId: string | null;
-      planId: string;
+      productId: string | null;
+      valueUsd: string | null;
+      txHash: string | null;
+      source: string | null;
+
+      // Customer identification fields
+      customerEmail: string | null;
+      customerDiscordId: string | null;
+      customerTelegramId: string | null;
+      customerDiscordUsername: string | null;
+      customerTelegramUsername: string | null;
     };
     context: {
-      externalRef?: string;
-      metadata?: Record<string, any>;
-      successUrl?: string;
-      cancelUrl?: string;
+      externalRef: string | null;
+      metadata: Record<string, any> | null;
+      successUrl: string | null;
+      cancelUrl: string | null;
     };
   };
 }
@@ -116,7 +126,36 @@ app.post('/webhooks', (req: Request, res: Response) => {
     console.log('Event Type:', webhook.type);
     console.log('Payment ID:', webhook.data.payment.id);
     console.log('Payment Status:', webhook.data.payment.status);
-    console.log('Plan ID:', webhook.data.payment.planId);
+
+    if (webhook.data.payment.productId) {
+      console.log('Product ID:', webhook.data.payment.productId);
+    }
+    if (webhook.data.payment.valueUsd) {
+      console.log('Amount (USD):', webhook.data.payment.valueUsd);
+    }
+    if (webhook.data.payment.source) {
+      console.log('Payment Source:', webhook.data.payment.source);
+    }
+    if (webhook.data.payment.txHash) {
+      console.log('Transaction Hash:', webhook.data.payment.txHash);
+    }
+
+    // Log customer information
+    if (webhook.data.payment.customerEmail) {
+      console.log('Customer Email:', webhook.data.payment.customerEmail);
+    }
+    if (webhook.data.payment.customerDiscordId) {
+      console.log('Discord ID:', webhook.data.payment.customerDiscordId);
+      if (webhook.data.payment.customerDiscordUsername) {
+        console.log('Discord Username:', webhook.data.payment.customerDiscordUsername);
+      }
+    }
+    if (webhook.data.payment.customerTelegramId) {
+      console.log('Telegram ID:', webhook.data.payment.customerTelegramId);
+      if (webhook.data.payment.customerTelegramUsername) {
+        console.log('Telegram Username:', webhook.data.payment.customerTelegramUsername);
+      }
+    }
 
     if (webhook.data.context.externalRef) {
       console.log('External Ref:', webhook.data.context.externalRef);
