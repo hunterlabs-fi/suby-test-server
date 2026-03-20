@@ -15,7 +15,7 @@ const SUBY_API_URL = process.env.SUBY_API_URL || 'https://api.suby.fi';
 // Type definitions
 interface WebhookPayload {
   id: string;
-  type: 'CHECKOUT_INITIATED' | 'CHECKOUT_SUCCESS' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED';
+  type: 'CHECKOUT_INITIATED' | 'CHECKOUT_SUCCESS' | 'TX_SUCCESS' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'PAYMENT_REFUNDED';
   createdAt: string;
   data: {
     payment: {
@@ -44,7 +44,7 @@ interface WebhookPayload {
 }
 
 interface PaymentInitiationRequest {
-  planId: string;
+  productId: string;
   customerEmail?: string;
   discount?: number;
   externalRef?: string;
@@ -64,6 +64,24 @@ interface PaymentInitiationResponse {
     code: string;
     message: string;
   };
+}
+
+interface ProductCreateRequest {
+  name: string;
+  description?: string;
+  frequencyInDays?: number | null;
+  priceCents: string;
+  currency: 'USD' | 'EUR';
+  platform?: 'DISCORD' | 'TELEGRAM' | 'WEB' | 'INVOICE';
+  paymentMethods: ('CRYPTO' | 'CARD')[];
+  acceptedAssets?: string[];
+  acceptedChains?: number[];
+  supply?: number | null;
+  imageUrl?: string;
+  discordGuildId?: string;
+  discordRoleId?: string;
+  discordRemindersId?: string;
+  telegramGroupId?: string;
 }
 
 // Middleware: Use raw body parser for webhook endpoint
@@ -168,23 +186,42 @@ app.post('/webhooks', (req: Request, res: Response) => {
     // Handle different webhook types
     switch (webhook.type) {
       case 'CHECKOUT_INITIATED':
+        // Customer started the payment process
+        // Use for: tracking checkout conversions, sending analytics
         console.log('[Webhook] Checkout initiated');
-        // Add your logic here (e.g., store payment in database)
         break;
 
       case 'CHECKOUT_SUCCESS':
-        console.log('[Webhook] Checkout completed successfully');
-        // Add your logic here
+        // Successful card checkout and payment authorization (card payments only, never sent for crypto)
+        // Use for: granting access for card payments, updating order status, sending confirmation emails
+        console.log('[Webhook] Checkout completed successfully (card payment)');
+        break;
+
+      case 'TX_SUCCESS':
+        // Crypto payment confirmed on-chain — funds are transferred instantly
+        // This is the definitive confirmation for crypto payments
+        // Use for: granting access for crypto payments, updating order status
+        console.log('[Webhook] Crypto transaction confirmed on-chain');
         break;
 
       case 'PAYMENT_SUCCESS':
-        console.log('[Webhook] Payment successful!');
-        // Add your logic here (e.g., grant access to subscription)
+        // Payment authorized by provider or confirmed on-chain
+        // For card payments: final settlement may occur later, access should already be granted at CHECKOUT_SUCCESS
+        // For crypto payments: confirmed on-chain (also triggers TX_SUCCESS)
+        console.log('[Webhook] Payment successful');
         break;
 
       case 'PAYMENT_FAILED':
+        // Payment failed after processing
+        // Crypto: on-chain failure. Card: may occur during settlement (can happen after CHECKOUT_SUCCESS)
+        // Use for: notifying customer, handling retries/fallback flows, updating order status
         console.log('[Webhook] Payment failed');
-        // Add your logic here (e.g., notify user, retry)
+        break;
+
+      case 'PAYMENT_REFUNDED':
+        // Card payment has been refunded
+        // Use for: revoking access, updating order status, notifying customer
+        console.log('[Webhook] Payment refunded');
         break;
 
       default:
@@ -214,12 +251,12 @@ app.post('/payment/create', async (req: Request, res: Response) => {
     const body: PaymentInitiationRequest = req.body;
 
     // Validate required fields
-    if (!body.planId) {
-      return res.status(400).json({ error: 'planId is required' });
+    if (!body.productId) {
+      return res.status(400).json({ error: 'productId is required' });
     }
 
     console.log('\n=== Creating Payment ===');
-    console.log('Plan ID:', body.planId);
+    console.log('Plan ID:', body.productId);
     if (body.customerEmail) console.log('Customer Email:', body.customerEmail);
     if (body.discount) console.log('Discount:', body.discount, 'basis points');
     if (body.externalRef) console.log('External Ref:', body.externalRef);
@@ -231,7 +268,7 @@ app.post('/payment/create', async (req: Request, res: Response) => {
       body,
       {
         headers: {
-          'Authorization': `X-Suby-Api-Key ${SUBY_API_KEY}`,
+          'x-suby-api-key': `${SUBY_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }
@@ -260,12 +297,119 @@ app.post('/payment/create', async (req: Request, res: Response) => {
   }
 });
 
+// Product creation endpoint
+app.post('/product/create', async (req: Request, res: Response) => {
+  try {
+    // Check API key is configured
+    if (!SUBY_API_KEY) {
+      console.error('[Product] SUBY_API_KEY not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    const body: ProductCreateRequest = req.body;
+
+    // Validate required fields
+    if (!body.name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    if (!body.priceCents) {
+      return res.status(400).json({ error: 'priceCents is required' });
+    }
+    if (!body.currency) {
+      return res.status(400).json({ error: 'currency is required' });
+    }
+    if (!body.paymentMethods || body.paymentMethods.length === 0) {
+      return res.status(400).json({ error: 'paymentMethods is required' });
+    }
+
+    console.log('\n=== Creating Product ===');
+    console.log('Name:', body.name);
+    console.log('Price:', body.priceCents, body.currency);
+    console.log('Platform:', body.platform || 'WEB (default)');
+    console.log('Payment Methods:', body.paymentMethods.join(', '));
+    if (body.frequencyInDays) console.log('Frequency:', body.frequencyInDays, 'days');
+    if (body.acceptedAssets) console.log('Assets:', body.acceptedAssets.join(', '));
+    if (body.acceptedChains) console.log('Chains:', body.acceptedChains.join(', '));
+    if (body.supply) console.log('Supply:', body.supply);
+
+    // Call Suby.fi API
+    const response = await axios.post(
+      `${SUBY_API_URL}/product/create`,
+      body,
+      {
+        headers: {
+          'x-suby-api-key': `${SUBY_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log('\nProduct created successfully! 🎉');
+    console.log('Product ID:', response.data.data?.id);
+    console.log('Status:', response.data.data?.status);
+    console.log('========================\n');
+
+    return res.status(200).json(response.data);
+
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('[Product] API Error:', error.response.data);
+      return res.status(error.response.status).json(error.response.data);
+    }
+
+    console.error('[Product] Error creating product:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// List customers endpoint
+app.get('/customer', async (req: Request, res: Response) => {
+  try {
+    if (!SUBY_API_KEY) {
+      console.error('[Customer] SUBY_API_KEY not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    const page = req.query.page || 1;
+    const limit = req.query.limit || 25;
+
+    console.log('\n=== Listing Customers ===');
+    console.log('Page:', page, '| Limit:', limit);
+
+    const response = await axios.get(
+      `${SUBY_API_URL}/customer`,
+      {
+        params: { page, limit },
+        headers: {
+          'x-suby-api-key': `${SUBY_API_KEY}`,
+        }
+      }
+    );
+
+    console.log('Total customers:', response.data.data?.pagination?.total || 0);
+    console.log('========================\n');
+
+    return res.status(200).json(response.data);
+
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      console.error('[Customer] API Error:', error.response.data);
+      return res.status(error.response.status).json(error.response.data);
+    }
+
+    console.error('[Customer] Error listing customers:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on ${PORT}`);
   console.log(`\n📋 Available endpoints:`);
   console.log(`   POST /webhooks        - Webhook receiver (signed)`);
-  console.log(`   POST /payment/create  - Create payment intent\n`);
+  console.log(`   POST /payment/create  - Create payment intent`);
+  console.log(`   POST /product/create  - Create product`);
+  console.log(`   GET  /customer        - List customers\n`);
 
   // Warn if environment variables are not set
   if (!WEBHOOK_SECRET) {

@@ -1,11 +1,12 @@
 # Suby.fi Test Server
 
-Simple Express + TypeScript server for testing Suby.fi webhook reception and payment intent creation.
+Simple Express + TypeScript server for testing Suby.fi webhook reception, payment intent creation, and product creation.
 
 ## Features
 
 - Webhook endpoint with signature verification (HMAC-SHA256)
 - Payment intent creation via Suby.fi API
+- Product creation via Suby.fi Merchant API
 - TypeScript with strict type checking
 - Environment variable configuration
 - Proper error handling and logging
@@ -30,7 +31,7 @@ cp .env.example .env
 PORT=3000
 WEBHOOK_SECRET=your_webhook_secret_here
 SUBY_API_KEY=sk_live_your_api_key_here
-SUBY_API_URL=https://api.suby.fi
+SUBY_API_URL=https://api.suby.fi/api
 ```
 
 ## Running the Server
@@ -70,11 +71,16 @@ Receives and verifies signed webhooks from Suby.fi. The endpoint:
 - Logs webhook events to console
 - Returns 200 OK on success
 
-Example webhook events:
-- `CHECKOUT_INITIATED` - Payment checkout initiated
-- `CHECKOUT_SUCCESS` - Checkout completed
-- `PAYMENT_SUCCESS` - Payment successful
-- `PAYMENT_FAILED` - Payment failed
+Webhook events:
+
+| Event | Description | Use case |
+|-------|-------------|----------|
+| `CHECKOUT_INITIATED` | Customer starts the payment process | Track checkout conversions, send analytics |
+| `CHECKOUT_SUCCESS` | Successful card checkout and payment authorization. **Card payments only**, never sent for crypto | Grant access for card payments, update order status, send confirmation emails |
+| `TX_SUCCESS` | Crypto payment confirmed on-chain — funds are transferred instantly. **Crypto payments only** | Grant access for crypto payments, update order status |
+| `PAYMENT_SUCCESS` | Payment authorized by provider or confirmed on-chain. For card payments, final settlement may occur later | For crypto: also triggers `TX_SUCCESS`. For card: access should already be granted at `CHECKOUT_SUCCESS` |
+| `PAYMENT_FAILED` | Payment failed after processing. Crypto: on-chain failure. Card: may occur during settlement (can happen after `CHECKOUT_SUCCESS`) | Notify customer, handle retries/fallback flows, update order status |
+| `PAYMENT_REFUNDED` | Card payment has been refunded | Revoke access, update order status, notify customer |
 
 Each webhook payload includes comprehensive payment and customer information:
 - Payment details (ID, status, amount, transaction hash)
@@ -116,6 +122,157 @@ Creates a payment intent on Suby.fi and returns:
 }
 ```
 
+### Create Product
+
+```bash
+POST /product/create
+Content-Type: application/json
+
+{
+  "name": "Premium Access",
+  "description": "Monthly premium membership",
+  "frequencyInDays": 30,
+  "priceCents": "999",
+  "currency": "EUR",
+  "platform": "WEB",
+  "paymentMethods": ["CRYPTO", "CARD"],
+  "acceptedAssets": ["USDC", "USDT"],
+  "acceptedChains": [8453, 42161],
+  "supply": 100,
+  "imageUrl": "https://example.com/product.png"
+}
+```
+
+Creates a product on Suby.fi via the Merchant API. The request is proxied to the Suby API using your API key.
+
+**Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Product name (1-100 chars) |
+| `description` | string | No | Description (max 500 chars) |
+| `frequencyInDays` | number\|null | No | Billing frequency in days (e.g. `30` for monthly). `null` = one-time purchase |
+| `priceCents` | string | Yes | Price in cents (`"999"` = 9.99 in the currency) |
+| `currency` | string | Yes | `USD` or `EUR` |
+| `platform` | string | No | `DISCORD`, `TELEGRAM`, `WEB`, `INVOICE`. Defaults to `WEB` |
+| `paymentMethods` | string[] | Yes | `CRYPTO` (wallet connect + QR code) and/or `CARD` (credit/debit card) |
+| `acceptedAssets` | string[] | No | Token symbols to accept (e.g. `["USDC", "ETH"]`). If omitted, all active assets are enabled |
+| `acceptedChains` | number[] | No | Chain IDs to accept (e.g. `[8453, 42161]`). If omitted, all active chains are enabled |
+| `supply` | number | No | Max subscriptions allowed (min 1). `null` = unlimited |
+| `imageUrl` | string | No | Direct URL to product image |
+| `discordGuildId` | string | DISCORD only | Discord server (guild) ID. **Required** when `platform` is `DISCORD` |
+| `discordRoleId` | string | DISCORD only | Discord role ID to grant subscribers. **Required** when `platform` is `DISCORD` |
+| `discordRemindersId` | string | No | Discord channel ID for renewal reminders. Only used with `DISCORD` platform |
+| `telegramGroupId` | string | TELEGRAM only | Telegram group/channel ID. **Required** when `platform` is `TELEGRAM` |
+
+**Payment Method Requirements:**
+
+| Method | Requirements |
+|--------|-------------|
+| `CRYPTO` | Merchant must have a receiving address configured (`merchantAddressEVM` for EVM chains, `merchantAddressSOL` for Solana) |
+| `CARD` | Merchant must have completed verification. Minimum price: 200 cents (2.00 USD/EUR). Requires a payout address |
+
+**Response:**
+
+The response shape adapts based on the product's platform. Fields irrelevant to the platform are excluded.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "clx_abc123",
+    "name": "Premium Access",
+    "description": "Monthly premium membership",
+    "status": "ACTIVE",
+    "platform": "WEB",
+    "frequencyInDays": 30,
+    "priceUsd": null,
+    "priceEur": "999",
+    "supply": 100,
+    "imageUrl": "https://example.com/product.png",
+    "createdAt": "2026-03-20T10:30:00.000Z",
+    "paymentMethods": ["CRYPTO", "CARD"],
+    "acceptedAssets": [
+      { "symbol": "USDC", "decimals": 6 },
+      { "symbol": "USDT", "decimals": 6 }
+    ],
+    "acceptedChains": [
+      { "id": 8453, "name": "Base" },
+      { "id": 42161, "name": "Arbitrum" }
+    ]
+  }
+}
+```
+
+For **DISCORD** platform, the response also includes:
+
+```json
+{
+  "discordGuildId": "123456789012345678",
+  "discordRoleId": "987654321098765432",
+  "discordRemindersId": "111222333444555666"
+}
+```
+
+For **TELEGRAM** platform, the response also includes:
+
+```json
+{
+  "telegramGroupId": "-1001234567890"
+}
+```
+
+**Notes:**
+- `supply` limits the total number of subscriptions (checked on first purchase only, not renewals)
+- EUR pricing: Card payments use EUR. Crypto payments are converted via EUR/USD Pyth oracle rate
+- Status is `ACTIVE` for DISCORD/WEB/INVOICE, `PENDING` for TELEGRAM
+- Assets are automatically resolved across all accepted chains (e.g. `"USDC"` adds USDC on Base, Arbitrum, etc.)
+
+### List Customers
+
+```bash
+GET /customer?page=1&limit=25
+```
+
+Returns a paginated list of customers who have at least one successful payment on your products.
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `page` | number | No | Page number (default: 1) |
+| `limit` | number | No | Results per page, max 25 (default: 25) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "data": [
+      {
+        "id": "clx_abc123",
+        "email": "customer@example.com",
+        "name": "John Doe",
+        "totalPayments": 5,
+        "createdAt": "2026-01-15T10:30:00.000Z",
+        "updatedAt": "2026-03-01T14:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 25,
+      "total": 42,
+      "totalPages": 2
+    }
+  }
+}
+```
+
+**Notes:**
+- Only customers who have payments on your products are returned
+- Payment history only includes payments made on your products (not other merchants)
+
 ## Testing Webhooks Locally
 
 To test webhooks on your local machine, you need to expose your server to the internet. Use one of these tools:
@@ -156,6 +313,24 @@ curl -X POST http://localhost:3000/payment/create \
     },
     "successUrl": "https://your-app.com/success",
     "cancelUrl": "https://your-app.com/cancel"
+  }'
+```
+
+### Creating a Product
+
+```bash
+curl -X POST http://localhost:3000/product/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Premium Access",
+    "description": "Monthly premium membership",
+    "frequencyInDays": 30,
+    "priceCents": "999",
+    "currency": "EUR",
+    "platform": "WEB",
+    "paymentMethods": ["CRYPTO"],
+    "acceptedAssets": ["USDC"],
+    "acceptedChains": [8453]
   }'
 ```
 
