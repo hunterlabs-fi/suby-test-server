@@ -72,8 +72,8 @@ Receives and verifies signed webhooks from Suby.fi. The endpoint:
 
 **Payment events:**
 - `CHECKOUT_INITIATED` - Payment checkout initiated
-- `CHECKOUT_SUCCESS` - Checkout completed (card authorized / crypto transaction confirmed)
-- `PAYMENT_SUCCESS` - Payment successful (fiat settlement completed)
+- `CHECKOUT_SUCCESS` - Card checkout completed (card authorized). **Card payments only.**
+- `PAYMENT_SUCCESS` - Crypto payment confirmed on-chain, or card payment fully settled (fiat settlement completed)
 - `PAYMENT_FAILED` - Payment failed
 - `PAYMENT_REFUNDED` - Card payment has been refunded
 
