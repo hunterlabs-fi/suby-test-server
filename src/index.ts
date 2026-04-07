@@ -83,6 +83,8 @@ type WebhookPayload = PaymentWebhookPayload | SubscriptionWebhookPayload;
 interface PaymentCreateRequest {
   productId: string;
   customerEmail?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
   externalRef?: string;
   metadata?: Record<string, any>;
   priceCents?: string;
@@ -94,6 +96,8 @@ interface PaymentCreateRequest {
 interface SubscriptionCreateRequest {
   productId: string;
   customerEmail?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
   externalRef?: string;
   metadata?: Record<string, any>;
   successUrl?: string;

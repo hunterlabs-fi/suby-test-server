@@ -106,6 +106,8 @@ Content-Type: application/json
 {
   "productId": "pro_456def",
   "customerEmail": "customer@example.com",
+  "customerFirstName": "John",
+  "customerLastName": "Doe",
   "externalRef": "order_789xyz",
   "metadata": {
     "orderId": "12345",
@@ -151,6 +153,8 @@ Content-Type: application/json
 {
   "productId": "pro_sub789",
   "customerEmail": "customer@example.com",
+  "customerFirstName": "John",
+  "customerLastName": "Doe",
   "externalRef": "sub_ref_001",
   "successUrl": "https://your-app.com/success",
   "cancelUrl": "https://your-app.com/cancel"
@@ -540,6 +544,8 @@ curl -X POST http://localhost:3000/payment/create \
   -d '{
     "productId": "pro_456def",
     "customerEmail": "test@example.com",
+    "customerFirstName": "John",
+    "customerLastName": "Doe",
     "externalRef": "order_123",
     "metadata": {
       "userId": "user_456"
