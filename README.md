@@ -204,6 +204,7 @@ Creates a product on Suby.fi via the Merchant API. The request is proxied to the
 | `name` | string | Yes | Product name (1-100 characters) |
 | `description` | string | No | Product description (max 500 characters) |
 | `frequencyInDays` | number\|null | No | Billing frequency in days (e.g. `30` for monthly). `null` or omitted = one-time purchase |
+| `isSandbox` | boolean | No | Set to `true` to create a sandbox product for testing. Defaults to `false` |
 | `isCustomPrice` | boolean | No | Set to `true` for dynamic pricing. When enabled, `priceCents` must not be set on the product — it is provided per-payment instead |
 | `priceCents` | string | Conditional | Price in cents as a string. **Required** when `isCustomPrice` is `false` (default). **Must NOT be provided** when `isCustomPrice` is `true`. Must be a positive integer |
 | `currency` | string | Conditional | Price currency: `"USD"` or `"EUR"`. **Required** when `isCustomPrice` is `false` (default). **Must NOT be provided** when `isCustomPrice` is `true` |
@@ -233,6 +234,7 @@ Creates a product on Suby.fi via the Merchant API. The request is proxied to the
     "status": "ACTIVE",
     "platform": "WEB",
     "frequencyInDays": 30,
+    "isSandbox": false,
     "isCustomPrice": false,
     "priceCents": "999",
     "currency": "EUR",
@@ -251,6 +253,46 @@ Creates a product on Suby.fi via the Merchant API. The request is proxied to the
   }
 }
 ```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique product identifier |
+| `name` | string | Product display name |
+| `description` | string\|null | Product description |
+| `status` | string | Product status: `ACTIVE`, `PENDING`, `CANCELLED`, `BOT_REMOVED`, `DRAFT` |
+| `platform` | string | Target platform: `WEB`, `INVOICE`, `DISCORD`, or `TELEGRAM` |
+| `frequencyInDays` | number\|null | Billing frequency in days. `null` = one-time product |
+| `isSandbox` | boolean | `true` if this is a sandbox (test) product |
+| `isCustomPrice` | boolean | `true` if price is set per-payment |
+| `priceCents` | string\|null | Price in cents. `null` for custom price products |
+| `currency` | string\|null | Price currency: `"USD"` or `"EUR"`. `null` for custom price products |
+| `supply` | number | Maximum subscriptions allowed |
+| `imageUrl` | string\|null | Product image URL |
+| `createdAt` | string | ISO 8601 creation timestamp |
+| `paymentMethods` | string[] | Enabled payment methods: `"CRYPTO"`, `"CARD"` |
+| `acceptedAssets` | object[] | Accepted tokens, deduplicated by symbol. Each entry has `symbol` and `decimals` |
+| `acceptedChains` | object[] | Accepted chains with `id` and `name` |
+
+**Notes:**
+- `supply` limits the total number of subscriptions (checked on first purchase only, not renewals)
+- EUR pricing: Inflow (card) payments use EUR. Crypto payments are converted via EUR/USD Pyth oracle rate
+- Status is `ACTIVE` for WEB/INVOICE
+- Assets are automatically resolved across all accepted chains (e.g. `"USDC"` adds USDC on Base, Arbitrum, etc.)
+- **Sandbox mode** (`isSandbox: true`): crypto payments only support Base Testnet (chain ID `84532`). If no chains/assets are specified, Base Testnet and its active assets are auto-selected. Card payments use test card numbers. Sandbox payments do not create merchant payouts or rolling reserves. Refunds skip the payment provider.
+
+**Error Examples:**
+
+| Scenario | Error Code | Message |
+|----------|-----------|---------|
+| No merchant EVM address for EVM chains | `EVM_ADDRESS_MISSING` | Crypto payments on EVM chains require a merchant EVM address |
+| No merchant SOL address for Solana | `SOLANA_ADDRESS_MISSING` | Crypto payments on Solana require a merchant Solana address |
+| Card without verification | `VERIFICATION_REQUIRED` | Card payments require merchant verification |
+| Card without payout address | `BAD_REQUEST` | Card payments require a payout address |
+| Card price too low | `BAD_REQUEST` | Card payments require a minimum price of 200 cents |
+| Unknown asset symbol | `ASSETS_NOT_FOUND` | Assets not found or not available on the selected chains |
+| priceCents set with isCustomPrice | `BAD_REQUEST` | priceCents must not be set when isCustomPrice is true |
 
 ### Update Product
 
@@ -280,6 +322,32 @@ Updates specific fields of an existing product. All fields are optional — only
 | `priceCents` | string | No | New price in cents. Cannot be changed for recurring card (AUTO_DEBIT) subscriptions. One-time products can always be updated. Minimum 200 cents if product has card payments |
 | `frequencyInDays` | number\|null | No | New billing frequency. Cannot be changed for products with card (AUTO_DEBIT) payments. Set to `null` to convert to one-time |
 | `supply` | number | No | New maximum subscriptions (minimum 1) |
+
+**Update Restrictions:**
+
+| Field | Crypto subscription | Card (AUTO_DEBIT) subscription | One-time product |
+|-------|-------------------|-------------------------------|-----------------|
+| `status` | Yes | Yes | Yes |
+| `priceCents` | Yes | No | Yes |
+| `frequencyInDays` | Yes | No | N/A |
+| `supply` | Yes | Yes | Yes |
+
+The price and frequency are locked for recurring AUTO_DEBIT subscriptions because the associated Inflow offer is immutable. For one-time AUTO_DEBIT products, price changes are allowed.
+
+The price is updated in the product's original currency (the one set at creation). Currency cannot be changed.
+
+**Response:**
+
+Returns the full updated product in the same format as the create endpoint.
+
+**Error Examples:**
+
+| Scenario | Error Code | Message |
+|----------|-----------|---------|
+| Change price on card subscription | `BAD_REQUEST` | Price cannot be changed for recurring card (AUTO_DEBIT) subscriptions |
+| Change frequency on card product | `BAD_REQUEST` | Billing frequency cannot be changed for products with card (AUTO_DEBIT) payments |
+| Cancel non-active product | `BAD_REQUEST` | Only ACTIVE products can be cancelled |
+| Reactivate non-cancelled product | `BAD_REQUEST` | Only CANCELLED products can be reactivated |
 
 **Example:**
 
@@ -324,6 +392,8 @@ Content-Type: application/json
 ```
 
 Refunds a card (fiat) payment. Only payments with status `PAYMENT_SUCCESS` or `CHECKOUT_SUCCESS` and source `FIAT` can be refunded. Crypto payments cannot be refunded.
+
+For **sandbox product** payments, the refund skips the payment provider and directly marks the payment as `REFUNDED`.
 
 **Response:**
 

@@ -104,6 +104,7 @@ interface ProductCreateRequest {
   name: string;
   description?: string;
   frequencyInDays?: number | null;
+  isSandbox?: boolean;
   isCustomPrice?: boolean;
   priceCents?: string;
   currency?: 'USD' | 'EUR';
