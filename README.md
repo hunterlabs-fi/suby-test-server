@@ -76,6 +76,7 @@ Receives and verifies signed webhooks from Suby.fi. The endpoint:
 - `PAYMENT_SUCCESS` - Crypto payment confirmed on-chain, or card payment fully settled (fiat settlement completed)
 - `PAYMENT_FAILED` - Payment failed
 - `PAYMENT_REFUNDED` - Card payment has been refunded
+- `PAYMENT_SETTLED` - Merchant payout completed, funds sent to payout account (contains all payments in the payout)
 
 **Subscription events:**
 - `SUBSCRIPTION_PAST_DUE` - Subscription renewal payment is overdue
@@ -589,7 +590,7 @@ curl -X POST http://localhost:3000/webhooks \
 ```typescript
 interface PaymentWebhookEvent {
   id: string;                    // Unique event ID (evt_xxx format)
-  type: "CHECKOUT_INITIATED" | "CHECKOUT_SUCCESS" | "PAYMENT_SUCCESS" | "PAYMENT_FAILED" | "PAYMENT_REFUNDED";
+  type: "CHECKOUT_INITIATED" | "CHECKOUT_SUCCESS" | "PAYMENT_SUCCESS" | "PAYMENT_FAILED" | "PAYMENT_REFUNDED" | "PAYMENT_SETTLED";
   createdAt: string;             // ISO 8601 timestamp
   data: {
     payment: {
@@ -616,6 +617,39 @@ interface PaymentWebhookEvent {
       successUrl: string | null;
       cancelUrl: string | null;
     };
+  };
+}
+```
+
+**Payment Settled Webhook Payload:**
+
+The `PAYMENT_SETTLED` event has a different payload structure since it contains all payments included in a single payout:
+
+```typescript
+interface PaymentSettledWebhookEvent {
+  id: string;                    // Unique event ID (evt_xxx format)
+  type: "PAYMENT_SETTLED";
+  createdAt: string;             // ISO 8601 timestamp
+  data: {
+    payout: {
+      id: string;                // Payout ID
+      payoutAmountCents: number; // Total payout amount in cents
+      currency: string;          // "USD" or "EUR"
+      paidOutAt: string;         // ISO 8601 timestamp
+    };
+    payments: Array<{
+      id: string;
+      productId: string | null;
+      subscriptionId: string | null;
+      priceCents: string | null;
+      currency: string | null;
+      grossAmountCents: number | null;
+      merchantNetCents: number | null;
+      customerEmail: string | null;
+      customerDiscordId: string | null;
+      customerTelegramId: string | null;
+      externalRef: string | null;
+    }>;
   };
 }
 ```

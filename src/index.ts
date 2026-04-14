@@ -46,6 +46,33 @@ interface PaymentWebhookPayload {
   };
 }
 
+interface PaymentSettledWebhookPayload {
+  id: string;
+  type: 'PAYMENT_SETTLED';
+  createdAt: string;
+  data: {
+    payout: {
+      id: string;
+      payoutAmountCents: number;
+      currency: string;
+      paidOutAt: string;
+    };
+    payments: Array<{
+      id: string;
+      productId: string | null;
+      subscriptionId: string | null;
+      priceCents: string | null;
+      currency: string | null;
+      grossAmountCents: number | null;
+      merchantNetCents: number | null;
+      customerEmail: string | null;
+      customerDiscordId: string | null;
+      customerTelegramId: string | null;
+      externalRef: string | null;
+    }>;
+  };
+}
+
 interface SubscriptionWebhookPayload {
   id: string;
   type: 'SUBSCRIPTION_PAST_DUE' | 'SUBSCRIPTION_EXPIRED';
@@ -78,7 +105,7 @@ interface SubscriptionWebhookPayload {
   };
 }
 
-type WebhookPayload = PaymentWebhookPayload | SubscriptionWebhookPayload;
+type WebhookPayload = PaymentWebhookPayload | PaymentSettledWebhookPayload | SubscriptionWebhookPayload;
 
 interface PaymentCreateRequest {
   productId: string;
@@ -199,6 +226,28 @@ app.post('/webhooks', (req: Request, res: Response) => {
     console.log('Event ID:', webhook.id);
     console.log('Event Type:', webhook.type);
     if (eventType) console.log('Event Header:', eventType);
+
+    // Handle payout settlement events
+    if ('payout' in webhook.data) {
+      const { payout, payments } = (webhook as PaymentSettledWebhookPayload).data;
+
+      console.log('Payout ID:', payout.id);
+      console.log('Payout Amount (cents):', payout.payoutAmountCents, payout.currency);
+      console.log('Paid Out At:', payout.paidOutAt);
+      console.log('Payments in payout:', payments.length);
+
+      for (const p of payments) {
+        console.log(` - Payment ${p.id}`);
+        if (p.productId) console.log(`   Product: ${p.productId}`);
+        if (p.subscriptionId) console.log(`   Subscription: ${p.subscriptionId}`);
+        if (p.grossAmountCents !== null) console.log(`   Gross (cents): ${p.grossAmountCents}`);
+        if (p.merchantNetCents !== null) console.log(`   Merchant Net (cents): ${p.merchantNetCents}`);
+        if (p.customerEmail) console.log(`   Customer: ${p.customerEmail}`);
+        if (p.externalRef) console.log(`   External Ref: ${p.externalRef}`);
+      }
+
+      console.log('[Webhook] Merchant payout settled');
+    }
 
     // Handle payment events
     if ('payment' in webhook.data) {
