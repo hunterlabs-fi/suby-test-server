@@ -219,13 +219,14 @@ Creates a product on Suby.fi via the Merchant API. The request is proxied to the
 | `acceptedChains` | number[] | No | Chain IDs to accept (e.g. `[8453, 42161, 101]`). If omitted, all active chains are enabled. Chains without matching assets are automatically excluded |
 | `supply` | number | No | Maximum number of subscriptions allowed (minimum 1). If omitted, defaults to unlimited |
 | `imageUrl` | string | No | Direct URL to a product image |
+| `isSandbox` | boolean | No | Set to `true` to create a sandbox (test) product. Sandbox products only support Base Testnet for crypto. Card payments use test card numbers. Defaults to `false` |
 
 **Payment Method Requirements:**
 
 | Method | Requirements |
 |--------|-------------|
 | `CRYPTO` | Merchant must have a receiving address configured: `merchantAddressEVM` for EVM chains, `merchantAddressSOL` for Solana. Only the addresses matching the selected chains are required |
-| `CARD` | Merchant must have completed verification (auto-debit approval). Minimum price: 200 cents (2.00 USD/EUR). Merchant must have a payout address configured (`merchantPayoutAddressEVM` or `merchantPayoutAddressSOL`) |
+| `CARD` | Merchant must have completed verification (auto-debit approval). Minimum price: 200 cents (2.00 USD/EUR). Merchant must have at least one `PayoutAccount` configured (EVM_ADDRESS, SOL_ADDRESS, or BANK_ACCOUNT) |
 
 **Response:**
 
@@ -298,6 +299,24 @@ Creates a product on Suby.fi via the Merchant API. The request is proxied to the
 | Card price too low | `BAD_REQUEST` | Card payments require a minimum price of 200 cents |
 | Unknown asset symbol | `ASSETS_NOT_FOUND` | Assets not found or not available on the selected chains |
 | priceCents set with isCustomPrice | `BAD_REQUEST` | priceCents must not be set when isCustomPrice is true |
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:3000/product/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Premium Access",
+    "description": "Monthly premium membership",
+    "frequencyInDays": 30,
+    "priceCents": "999",
+    "currency": "EUR",
+    "platform": "WEB",
+    "paymentMethods": ["CRYPTO"],
+    "acceptedAssets": ["USDC", "USDT"],
+    "acceptedChains": [8453, 42161]
+  }'
+```
 
 ### Update Product
 
@@ -733,7 +752,7 @@ npm run build
 | `PORT` | No | Server port (default: 3000) |
 | `WEBHOOK_SECRET` | Yes | Webhook signature verification secret |
 | `SUBY_API_KEY` | Yes | API key for Suby.fi (format: sk_live_xxx) |
-| `SUBY_API_URL` | No | Suby.fi API base URL (default: https://api.suby.fi) |
+| `SUBY_API_URL` | No | Suby.fi API base URL (default: https://api.suby.fi/api) |
 
 ## Available Suby API Endpoints
 
