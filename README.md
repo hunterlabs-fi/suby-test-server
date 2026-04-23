@@ -71,8 +71,9 @@ Receives and verifies signed webhooks from Suby.fi. The endpoint:
 - Returns 200 OK on success
 
 **Payment events:**
-- `CHECKOUT_INITIATED` - Payment checkout initiated
+- `CHECKOUT_INITIATED` - Payment checkout initiated (sent immediately after `/payment/create`; `customFieldsResponse` is `null` at this stage)
 - `CHECKOUT_SUCCESS` - Card checkout completed (card authorized). **Card payments only.**
+- `CHECKOUT_FAILED` - Card checkout failed before authorization (e.g. 3DS failure). **Card payments only.**
 - `PAYMENT_SUCCESS` - Crypto payment confirmed on-chain, or card payment fully settled (fiat settlement completed)
 - `PAYMENT_FAILED` - Payment failed
 - `PAYMENT_REFUNDED` - Card payment has been refunded
@@ -90,7 +91,7 @@ Each webhook includes these headers:
 Payment webhook payload includes:
 - Payment details (ID, status, amount, transaction hash, custom price, VAT)
 - Customer identification (email, Discord ID/username, Telegram ID/username)
-- Context data (external reference, metadata, redirect URLs)
+- Context data (external reference, metadata, `customFieldsResponse`, redirect URLs)
 
 Subscription webhook payload includes:
 - Subscription details (ID, status, productId, expiresAt)
@@ -114,6 +115,36 @@ Content-Type: application/json
     "orderId": "12345",
     "source": "mobile_app"
   },
+  "customFields": [
+    {
+      "key": "discord_username",
+      "label": "Discord username",
+      "type": "input",
+      "required": true,
+      "placeholder": "e.g. test#1234",
+      "validation": {
+        "regex": "^.{2,32}$",
+        "errorMessage": "Please enter a valid Discord username"
+      }
+    },
+    {
+      "key": "referral_source",
+      "label": "How did you hear about us?",
+      "type": "select",
+      "placeholder": "Pick one",
+      "options": [
+        { "value": "twitter", "label": "Twitter / X" },
+        { "value": "discord", "label": "Discord" },
+        { "value": "friend", "label": "A friend" }
+      ]
+    },
+    {
+      "key": "terms_accepted",
+      "label": "I accept the terms and conditions",
+      "type": "checkbox",
+      "required": true
+    }
+  ],
   "successUrl": "https://your-app.com/success",
   "cancelUrl": "https://your-app.com/cancel"
 }
@@ -130,7 +161,20 @@ Creates a one-time payment and returns:
     "metadata": {
       "orderId": "12345",
       "source": "mobile_app"
-    }
+    },
+    "customFields": [
+      {
+        "key": "discord_username",
+        "label": "Discord username",
+        "type": "input",
+        "required": true,
+        "placeholder": "e.g. test#1234",
+        "validation": {
+          "regex": "^.{2,32}$",
+          "errorMessage": "Please enter a valid Discord username"
+        }
+      }
+    ]
   }
 }
 ```
@@ -144,6 +188,32 @@ Creates a one-time payment and returns:
 >   "currency": "USD"
 > }
 > ```
+
+#### Custom Fields
+
+`customFields` lets you collect extra information from the customer on the checkout page (e.g. a Discord username, a referral source, a terms-of-service checkbox). The field **definitions** are attached to the payment at creation time; the **customer responses** are collected at checkout and returned to you in webhook payloads as `customFieldsResponse`.
+
+**Field definition:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | Yes | Unique identifier for the field. Lowercase alphanumeric + underscores, max 50 chars. Used as the key in `customFieldsResponse` |
+| `label` | string | Yes | Human-readable label shown on checkout. Max 100 chars |
+| `type` | string | Yes | One of `"input"`, `"select"`, `"checkbox"` |
+| `required` | boolean | No | When `true`, the customer must fill the field (`input`/`select`) or tick it (`checkbox`) before submitting. Defaults to `false` |
+| `placeholder` | string | No | Placeholder shown inside the field (`input`) or as the dropdown's unselected state (`select`). Ignored for `checkbox`. Max 200 chars. When omitted, no placeholder is rendered |
+| `options` | object[] | Conditional | **Required** for `type: "select"`. Array of `{ value, label }` entries. `value` and `label` are each max 100 chars |
+| `validation` | object | No | **`type: "input"` only.** `{ regex, errorMessage? }`. The customer's input is tested against `regex` (max 500 chars); if it fails, `errorMessage` (max 200 chars, or a default message) is shown |
+
+**Rules:**
+- Maximum **10 custom fields** per payment. Field `key` values must be unique within the array.
+- Checkbox fields are stored as the literal strings `"true"` or `"false"` in `customFieldsResponse`.
+- Non-required fields left empty are omitted from `customFieldsResponse`.
+- Custom fields are **one-time-payment only**. They are not collected on `/subscription/create`.
+- Response lifecycle:
+  - `customFieldsResponse` is `null` on `CHECKOUT_INITIATED` (customer has not submitted the checkout form yet).
+  - It is populated once the customer submits the checkout, and is present on `CHECKOUT_SUCCESS`, `CHECKOUT_FAILED`, `PAYMENT_SUCCESS`, `PAYMENT_FAILED`, and `PAYMENT_REFUNDED`.
+  - It is **not** included in `PAYMENT_SETTLED` (that event has a different payout-oriented payload).
 
 ### Create Subscription Payment
 
@@ -568,12 +638,112 @@ curl -X POST http://localhost:3000/subscription/create \
   }'
 ```
 
+### Creating a One-Time Payment with Custom Fields (Postman)
+
+**Request:**
+
+```
+POST http://localhost:3000/payment/create
+Content-Type: application/json
+```
+
+**Body (raw / JSON):**
+
+```json
+{
+  "productId": "pro_456def",
+  "customerEmail": "customer@example.com",
+  "customerFirstName": "John",
+  "customerLastName": "Doe",
+  "externalRef": "order_cf_001",
+  "customFields": [
+    {
+      "key": "discord_username",
+      "label": "Discord username",
+      "type": "input",
+      "required": true,
+      "placeholder": "e.g. test#1234",
+      "validation": {
+        "regex": "^.{2,32}$",
+        "errorMessage": "Please enter a valid Discord username"
+      }
+    },
+    {
+      "key": "referral_source",
+      "label": "How did you hear about us?",
+      "type": "select",
+      "placeholder": "Pick one",
+      "options": [
+        { "value": "twitter", "label": "Twitter / X" },
+        { "value": "discord", "label": "Discord" },
+        { "value": "friend", "label": "A friend" },
+        { "value": "other", "label": "Other" }
+      ]
+    },
+    {
+      "key": "terms_accepted",
+      "label": "I accept the terms and conditions",
+      "type": "checkbox",
+      "required": true
+    }
+  ],
+  "successUrl": "https://your-app.com/success",
+  "cancelUrl": "https://your-app.com/cancel"
+}
+```
+
+**Equivalent curl:**
+
+```bash
+curl -X POST http://localhost:3000/payment/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "pro_456def",
+    "customerEmail": "customer@example.com",
+    "customFields": [
+      {
+        "key": "discord_username",
+        "label": "Discord username",
+        "type": "input",
+        "required": true,
+        "placeholder": "e.g. test#1234",
+        "validation": { "regex": "^.{2,32}$" }
+      },
+      {
+        "key": "referral_source",
+        "label": "How did you hear about us?",
+        "type": "select",
+        "placeholder": "Pick one",
+        "options": [
+          { "value": "twitter", "label": "Twitter / X" },
+          { "value": "friend", "label": "A friend" }
+        ]
+      },
+      {
+        "key": "terms_accepted",
+        "label": "I accept the terms and conditions",
+        "type": "checkbox"
+      }
+    ]
+  }'
+```
+
+Once the customer completes checkout, the `PAYMENT_SUCCESS` webhook `context.customFieldsResponse` will look like:
+
+```json
+{
+  "discord_username": "johndoe#1234",
+  "referral_source": "friend",
+  "terms_accepted": "true"
+}
+```
+
 ### Simulating a Webhook (for testing)
 
 ```bash
 # Generate signature with complete payload including customer fields
 TIMESTAMP=$(date +%s)
-BODY='{"id":"evt_test123","type":"PAYMENT_SUCCESS","createdAt":"2026-02-05T10:30:00.000Z","data":{"payment":{"id":"pay_abc123xyz","status":"PAYMENT_SUCCESS","subscriptionId":"sub_xyz789","productId":"product_456def","valueUsd":"999","priceCents":"999","currency":"USD","vatAmountCents":null,"totalAmountCents":null,"txHash":null,"source":"FIAT","customerEmail":"customer@example.com","customerDiscordId":null,"customerTelegramId":null,"customerDiscordUsername":null,"customerTelegramUsername":null},"context":{"externalRef":"order_789xyz","metadata":{"orderId":"12345","source":"mobile_app"},"successUrl":"https://your-app.com/success","cancelUrl":"https://your-app.com/cancel"}}}'
+BODY='{"id":"evt_test123","type":"PAYMENT_SUCCESS","createdAt":"2026-02-05T10:30:00.000Z","data":{"payment":{"id":"pay_abc123xyz","status":"PAYMENT_SUCCESS","subscriptionId":"sub_xyz789","productId":"product_456def","valueUsd":"999","priceCents":"999","currency":"USD","vatAmountCents":null,"totalAmountCents":null,"txHash":null,"source":"FIAT","customerEmail":"customer@example.com","customerDiscordId":null,"customerTelegramId":null,"customerDiscordUsername":null,"customerTelegramUsername":null},"context":{"externalRef":"order_789xyz","metadata":{"orderId":"12345","source":"mobile_app"},"customFieldsResponse":{"discord_username":"johndoe#1234","referral_source":"friend","terms_accepted":"true"},"successUrl":"https://your-app.com/success","cancelUrl":"https://your-app.com/cancel"}}}'
 SIGNATURE=$(echo -n "${TIMESTAMP}.${BODY}" | openssl dgst -sha256 -hmac "your_webhook_secret_here" | cut -d' ' -f2)
 
 # Send webhook
@@ -590,7 +760,7 @@ curl -X POST http://localhost:3000/webhooks \
 ```typescript
 interface PaymentWebhookEvent {
   id: string;                    // Unique event ID (evt_xxx format)
-  type: "CHECKOUT_INITIATED" | "CHECKOUT_SUCCESS" | "PAYMENT_SUCCESS" | "PAYMENT_FAILED" | "PAYMENT_REFUNDED" | "PAYMENT_SETTLED";
+  type: "CHECKOUT_INITIATED" | "CHECKOUT_SUCCESS" | "CHECKOUT_FAILED" | "PAYMENT_SUCCESS" | "PAYMENT_FAILED" | "PAYMENT_REFUNDED" | "PAYMENT_SETTLED";
   createdAt: string;             // ISO 8601 timestamp
   data: {
     payment: {
@@ -614,6 +784,7 @@ interface PaymentWebhookEvent {
     context: {
       externalRef: string | null;
       metadata: Record<string, any> | null;
+      customFieldsResponse: Record<string, string> | null;  // keyed by customField.key; checkbox → "true"/"false"; optional empty fields omitted; null until the customer submits the checkout
       successUrl: string | null;
       cancelUrl: string | null;
     };

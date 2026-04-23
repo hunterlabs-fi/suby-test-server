@@ -16,7 +16,7 @@ const SUBY_API_URL = process.env.SUBY_API_URL || 'https://api.suby.fi';
 
 interface PaymentWebhookPayload {
   id: string;
-  type: 'CHECKOUT_INITIATED' | 'CHECKOUT_SUCCESS' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'PAYMENT_REFUNDED';
+  type: 'CHECKOUT_INITIATED' | 'CHECKOUT_SUCCESS' | 'CHECKOUT_FAILED' | 'PAYMENT_SUCCESS' | 'PAYMENT_FAILED' | 'PAYMENT_REFUNDED';
   createdAt: string;
   data: {
     payment: {
@@ -40,6 +40,7 @@ interface PaymentWebhookPayload {
     context: {
       externalRef: string | null;
       metadata: Record<string, any> | null;
+      customFieldsResponse: Record<string, string> | null;
       successUrl: string | null;
       cancelUrl: string | null;
     };
@@ -108,6 +109,16 @@ interface SubscriptionWebhookPayload {
 
 type WebhookPayload = PaymentWebhookPayload | PaymentSettledWebhookPayload | SubscriptionWebhookPayload;
 
+interface CustomFieldDefinition {
+  key: string;
+  label: string;
+  type: 'input' | 'select' | 'checkbox';
+  required?: boolean;
+  placeholder?: string;
+  options?: Array<{ value: string; label: string }>;
+  validation?: { regex: string; errorMessage?: string };
+}
+
 interface PaymentCreateRequest {
   productId: string;
   customerEmail?: string;
@@ -115,6 +126,7 @@ interface PaymentCreateRequest {
   customerLastName?: string;
   externalRef?: string;
   metadata?: Record<string, any>;
+  customFields?: CustomFieldDefinition[];
   priceCents?: string;
   currency?: string;
   successUrl?: string;
@@ -284,12 +296,24 @@ app.post('/webhooks', (req: Request, res: Response) => {
       if (context.externalRef) console.log('External Ref:', context.externalRef);
       if (context.metadata) console.log('Metadata:', JSON.stringify(context.metadata, null, 2));
 
+      if (context.customFieldsResponse === null) {
+        console.log('Custom Fields Response: (not yet submitted)');
+      } else if (context.customFieldsResponse) {
+        console.log('Custom Fields Response:');
+        for (const [key, value] of Object.entries(context.customFieldsResponse)) {
+          console.log(`   ${key}: ${value}`);
+        }
+      }
+
       switch (webhook.type) {
         case 'CHECKOUT_INITIATED':
           console.log('[Webhook] Checkout initiated');
           break;
         case 'CHECKOUT_SUCCESS':
           console.log('[Webhook] Checkout completed successfully');
+          break;
+        case 'CHECKOUT_FAILED':
+          console.log('[Webhook] Checkout failed before authorization');
           break;
         case 'PAYMENT_SUCCESS':
           console.log('[Webhook] Payment successful');
@@ -365,6 +389,13 @@ app.post('/payment/create', async (req: Request, res: Response) => {
     if (body.externalRef) console.log('External Ref:', body.externalRef);
     if (body.priceCents) console.log('Custom Price:', body.priceCents, body.currency);
     if (body.metadata) console.log('Metadata:', JSON.stringify(body.metadata, null, 2));
+    if (body.customFields && body.customFields.length > 0) {
+      console.log(`Custom Fields: ${body.customFields.length} defined`);
+      for (const f of body.customFields) {
+        const required = f.required ? ' (required)' : '';
+        console.log(`   - ${f.key} [${f.type}]${required}: ${f.label}`);
+      }
+    }
 
     const response = await axios.post(
       `${SUBY_API_URL}/api/payment/create`,
