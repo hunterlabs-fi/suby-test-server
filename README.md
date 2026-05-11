@@ -71,7 +71,7 @@ Receives and verifies signed webhooks from Suby.fi. The endpoint:
 - Returns 200 OK on success
 
 **Payment events:**
-- `CHECKOUT_INITIATED` - Payment checkout initiated (sent immediately after `/payment/create`; `customFieldsResponse` is `null` at this stage)
+- `CHECKOUT_INITIATED` - Payment checkout initiated (sent immediately after `/payment/create`; `customFieldsResponse` is `null` at this stage; `customerEmail` is `null` if you created the payment without `customerEmail` — the buyer will provide their email on the hosted checkout page and the customer will be linked to the payment at that moment)
 - `CHECKOUT_SUCCESS` - Card checkout completed (card authorized). **Card payments only.**
 - `CHECKOUT_FAILED` - Card checkout failed before authorization (e.g. 3DS failure). **Card payments only.**
 - `PAYMENT_SUCCESS` - Crypto payment confirmed on-chain, or card payment fully settled (fiat settlement completed)
@@ -91,7 +91,7 @@ Each webhook includes these headers:
 Payment webhook payload includes:
 - Payment details (ID, status, amount, transaction hash, custom price, VAT)
 - Customer identification (email, Discord ID/username, Telegram ID/username)
-- Context data (external reference, metadata, `customFieldsResponse`, redirect URLs)
+- Context data (external reference, metadata, `customFields` definitions, `customFieldsResponse`, redirect URLs)
 
 Subscription webhook payload includes:
 - Subscription details (ID, status, productId, expiresAt)
@@ -100,6 +100,8 @@ Subscription webhook payload includes:
 - Context data (external reference, metadata)
 
 ### Create One-Time Payment
+
+> **`customerEmail` is optional.** If you omit it (and `customerFirstName` / `customerLastName`), the payment is created without a customer. The hosted checkout page (`paymentUrl`) will collect the email at pay time and link the user to the payment then. Webhooks fired before that (e.g. `CHECKOUT_INITIATED`) will have `customerEmail: null`; subsequent webhooks always include it.
 
 ```bash
 POST /payment/create
@@ -216,6 +218,8 @@ Creates a one-time payment and returns:
   - It is **not** included in `PAYMENT_SETTLED` (that event has a different payout-oriented payload).
 
 ### Create Subscription Payment
+
+> **`customerEmail` is optional** here too. Same behavior as `/payment/create`: omit it to collect the email on the hosted checkout page at pay time.
 
 ```bash
 POST /subscription/create
@@ -626,6 +630,17 @@ curl -X POST http://localhost:3000/payment/create \
   }'
 ```
 
+Or without a customer (email collected at checkout time):
+
+```bash
+curl -X POST http://localhost:3000/payment/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "pro_456def",
+    "externalRef": "order_123"
+  }'
+```
+
 ### Creating a Subscription Payment
 
 ```bash
@@ -637,6 +652,8 @@ curl -X POST http://localhost:3000/subscription/create \
     "externalRef": "sub_001"
   }'
 ```
+
+`customerEmail` is optional for subscriptions too — omit it to collect the email on the hosted checkout page.
 
 ### Creating a One-Time Payment with Custom Fields (Postman)
 
@@ -784,6 +801,7 @@ interface PaymentWebhookEvent {
     context: {
       externalRef: string | null;
       metadata: Record<string, any> | null;
+      customFields: CustomField[] | null;                   // echo of the definitions attached at payment creation (null if none)
       customFieldsResponse: Record<string, string> | null;  // keyed by customField.key; checkbox → "true"/"false"; optional empty fields omitted; null until the customer submits the checkout
       successUrl: string | null;
       cancelUrl: string | null;

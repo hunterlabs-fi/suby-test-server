@@ -40,6 +40,7 @@ interface PaymentWebhookPayload {
     context: {
       externalRef: string | null;
       metadata: Record<string, any> | null;
+      customFields: CustomFieldDefinition[] | null;
       customFieldsResponse: Record<string, string> | null;
       successUrl: string | null;
       cancelUrl: string | null;
